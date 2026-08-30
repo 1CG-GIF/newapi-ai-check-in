@@ -1005,8 +1005,9 @@ class CheckIn:
             # 如果需要手动 topup（配置了 topup_path 和 get_cdk），执行 topup
             if self.provider_config.needs_manual_topup():
                 print(f"ℹ️ {self.account_name}: Provider requires manual topup, executing...")
-                # 将登录后的 cookies 存入 account_config.extra，供 get_cdk 函数使用（如维云翻卡）
+                # 将登录后的 cookies 和 api_user 存入 account_config.extra，供 get_cdk 函数使用（如维云翻卡）
                 self.account_config.extra["_session_cookies"] = cookies
+                self.account_config.extra["_api_user"] = api_user
                 topup_result = await self.execute_topup(headers, cookies, api_user)
                 if topup_result.get("topup_count", 0) > 0:
                     print(
@@ -1111,8 +1112,9 @@ class CheckIn:
             # 如果需要手动 topup（配置了 topup_path 和 get_cdk），执行 topup
             if self.provider_config.needs_manual_topup():
                 print(f"ℹ️ {self.account_name}: Provider requires manual topup, executing...")
-                # 将登录后的 cookies 存入 account_config.extra，供 get_cdk 函数使用（如维云翻卡）
+                # 将登录后的 cookies 和 api_user 存入 account_config.extra，供 get_cdk 函数使用（如维云翻卡）
                 self.account_config.extra["_session_cookies"] = session.cookies.get_dict()
+                self.account_config.extra["_api_user"] = api_user
                 topup_result = await self.execute_topup(headers, session.cookies.get_dict(), api_user)
                 if topup_result.get("topup_count", 0) > 0:
                     print(

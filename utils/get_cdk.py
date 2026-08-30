@@ -873,6 +873,11 @@ def get_vsllm_gwent_draw(
         yield False, {"error": "_session_cookies not found in account config"}
         return
 
+    # 获取 api_user（由 check_in_with_cookies 在调用前存入）
+    api_user = account_config.get("_api_user")
+    if not api_user:
+        print(f"⚠️ {account_name}: _api_user not found, gwent API may return 401")
+
     # 代理优先级: 账号配置 > 全局配置
     proxy_config = account_config.proxy or account_config.get("global_proxy")
     http_proxy = proxy_resolve(proxy_config)
@@ -901,6 +906,10 @@ def get_vsllm_gwent_draw(
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
                 ),
             }
+
+            # 添加 new-api-user header（维云 API 需要此 header 认证）
+            if api_user:
+                headers["new-api-user"] = f"{api_user}"
 
             # 设置登录 cookies
             session.cookies.update(session_cookies)
