@@ -1,178 +1,139 @@
-﻿name: newapi.ai 鑷姩绛惧埌
+name: newapi.ai auto checkin
+
 on:
   schedule:
     - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
       accounts:
-        description: '璐﹀彿閰嶇疆 (JSON 鏍煎紡锛屽彲閫夛紝涓嶅～鍒欎娇鐢?secrets.ACCOUNTS)'
+        description: 'Account config (JSON, optional, uses secrets.ACCOUNTS if empty)'
         required: false
         type: string
         default: ''
       providers:
-        description: '鑷畾涔?Provider 閰嶇疆 (JSON 鏍煎紡锛屽彲閫夛紝涓嶅～鍒欎娇鐢?secrets.PROVIDERS)'
+        description: 'Custom Provider config (JSON, optional, uses secrets.PROVIDERS if empty)'
         required: false
         type: string
         default: ''
       debug:
-        description: '璋冭瘯妯″紡 (鍚敤鍚庝細淇濆瓨鎴浘鍜?HTML 鏃ュ織)'
+        description: 'Debug mode (save screenshots and HTML logs)'
         required: false
         type: boolean
+        default: false
 
 jobs:
   checkin:
-    permissions:
-      id-token: write
-      contents: read
-    runs-on: windows-2025
+    runs-on: windows-latest
     environment: production
-    env:
-      PYTHONIOENCODING: utf-8
     steps:
-    - name: set beijing timezone
-      uses: szenius/set-timezone@v2.0
-      with:
-        timezoneWindows: "China Standard Time"
+      - name: Set Beijing timezone
+        uses: szenius/set-timezone@v2.0
+        with:
+          timezoneLinux: Asia/Shanghai
+          timezoneMacos: Asia/Shanghai
+          timezoneWindows: China Standard Time
 
-    - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - uses: astral-sh/setup-uv@v3
-      with:
-        version: "latest"
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
 
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-    - name: 缂撳瓨 UV 渚濊禆
-      uses: actions/cache@v4
-      id: uv-cache
-      with:
-        path: |
-          ~/.cache/uv
-          .venv
-        key: ${{ runner.os }}-uv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-uv-
+      - name: Cache UV dependencies
+        id: uv-cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
 
-    - name: 瀹夎渚濊禆
-      if: steps.uv-cache.outputs.cache-hit != 'true'
-      run: |
-        echo "缂撳瓨鏈懡涓紝寮€濮嬪畨瑁呴」鐩緷璧?.."
-        uv sync
-        echo "鉁?鐜鍒濆鍖栧畬鎴?
+      - name: Install dependencies
+        if: steps.uv-cache.outputs.cache-hit != 'true'
+        run: uv sync
 
-    - name: 鑾峰彇 Camoufox 鐗堟湰
-      id: camoufox-version
-      run: |
-        $version = uv run python -c "import importlib.metadata; print(importlib.metadata.version('camoufox'))"
-        echo "version=$version" >> $env:GITHUB_OUTPUT
-        echo "Camoufox version: $version"
+      - name: Get Camoufox version
+        id: camoufox-version
+        run: |
+          $version = uv run python -c "import importlib.metadata; print(importlib.metadata.version('camoufox'))"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
 
-    - name: 缂撳瓨 Camoufox 娴忚鍣?
-      uses: actions/cache@v4
-      id: camoufox-cache
-      with:
-        path: ~\AppData\Local\camoufox
-        key: ${{ runner.os }}-camoufox-${{ steps.camoufox-version.outputs.version }}
-        restore-keys: |
-          ${{ runner.os }}-camoufox-
+      - name: Cache Camoufox browser
+        id: camoufox-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.camoufox
+          key: camoufox-${{ runner.os }}-${{ steps.camoufox-version.outputs.version }}
 
-    - name: 瀹夎 Camoufox 娴忚鍣?
-      if: steps.camoufox-cache.outputs.cache-hit != 'true'
-      run: |
-        echo "缂撳瓨鏈懡涓紝寮€濮嬩笅杞?Camoufox 娴忚鍣?.."
-        uv run camoufox fetch
-        echo "鉁?Camoufox 娴忚鍣ㄥ畨瑁呭畬鎴?
+      - name: Install Camoufox browser
+        if: steps.camoufox-cache.outputs.cache-hit != 'true'
+        run: uv run camoufox fetch
 
-    - name: 鎭㈠鐧诲綍鐘舵€佺紦瀛?
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          storage-states
-        key: storage-state-${{ hashFiles('storage-states/*.json') }}
-        restore-keys: |
-          storage-state-
+      - name: Restore login state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: storage-states
+          key: storage-state-${{ hashFiles('storage-states/*.json') }}
+          restore-keys: |
+            storage-state-
 
-    - name: 鎭㈠浣欓鍘嗗彶缂撳瓨
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          balance_hash.txt
-        key: balance-hash-${{ hashFiles('balance_hash.txt') }}
-        restore-keys: |
-          balance-hash-
-            
-    - name: 鎵ц绛惧埌
-      env:
-        ACCOUNTS: ${{ inputs.accounts || secrets.ACCOUNTS }}
-        ACCOUNTS_LINUX_DO: ${{ secrets.ACCOUNTS_LINUX_DO }}
-        ACCOUNTS_GITHUB: ${{ secrets.ACCOUNTS_GITHUB }}
-        PROVIDERS: ${{ inputs.providers || secrets.PROVIDERS }}
-        PROXY: ${{secrets.PROXY}}
-        STORATE_STATES_GITHUB: ${{ secrets.STORATE_STATES_GITHUB }}
-        STORATE_STATES_LINUXDO: ${{ secrets.STORATE_STATES_LINUXDO }}
-        DEBUG: ${{ github.event_name == 'workflow_dispatch' && inputs.debug || vars.DEBUG || 'false' }}
-        DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}
-        EMAIL_USER: ${{ secrets.EMAIL_USER }}
-        EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-        EMAIL_TO: ${{ secrets.EMAIL_TO }}
-        CUSTOM_SMTP_SERVER: ${{ secrets.CUSTOM_SMTP_SERVER }}
-        PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-        SERVERPUSHKEY: ${{ secrets.SERVERPUSHKEY }}
-        FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-        WEIXIN_WEBHOOK: ${{ secrets.WEIXIN_WEBHOOK }}
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: |
-        # 鍒楀嚭 storage-states 鐩綍鏂囦欢
-        if (Test-Path "storage-states") {
-          echo "馃搧 storage-states 鐩綍鍐呭:"
-          echo "缁濆璺緞: $(Resolve-Path storage-states)"
-          echo ""
-          echo "鎵€鏈夋枃浠?"
-          Get-ChildItem -Path storage-states -File | ForEach-Object { echo "  - $($_.Name)" }
-          echo ""
-          echo "璇︾粏淇℃伅:"
-          Get-ChildItem -Path storage-states -File | Format-Table Name, Length, LastWriteTime -AutoSize
-          echo "鏂囦欢鎬绘暟: $((Get-ChildItem -Path storage-states -File).Count)"
-        } else {
-          echo "鈿狅笍 storage-states 鐩綍涓嶅瓨鍦?
-        }
-        # 鎵ц绛惧埌
-        uv run python -u main.py
+      - name: Restore balance history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: balance_hash.txt
+          key: balance-hash-${{ hashFiles('balance_hash.txt') }}
 
-    - name: 淇濆瓨鐧诲綍鐘舵€佺紦瀛?
-      if: always() && hashFiles('storage-states/*.json') != ''
-      uses: actions/cache/save@v4
-      with:
-        path: |
-          storage-states
-        key: storage-state-${{ hashFiles('storage-states/*.json') }}
+      - name: Run checkin
+        env:
+          ACCOUNTS: ${{ secrets.ACCOUNTS }}
+          PROVIDERS: ${{ secrets.PROVIDERS }}
+          ACCOUNTS_GITHUB: ${{ secrets.ACCOUNTS_GITHUB }}
+          ACCOUNTS_LINUX_DO: ${{ secrets.ACCOUNTS_LINUX_DO }}
+          PROXY: ${{ secrets.PROXY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DEBUG: ${{ inputs.debug }}
+          ACCOUNTS_INPUT: ${{ inputs.accounts }}
+          PROVIDERS_INPUT: ${{ inputs.providers }}
+        run: |
+          if (Test-Path "storage-states") {
+            echo "storage-states directory exists"
+            Get-ChildItem -Path storage-states -File | ForEach-Object { echo "  - $($_.Name)" }
+          } else {
+            echo "storage-states directory does not exist"
+          }
+          uv run python main.py
 
-    - name: 淇濆瓨浣欓鍘嗗彶缂撳瓨
-      if: hashFiles('balance_hash.txt') != ''
-      uses: actions/cache/save@v4
-      with:
-        path: |
-          balance_hash.txt
-        key: balance-hash-${{ hashFiles('balance_hash.txt') }}
+      - name: Save login state cache
+        if: always() && hashFiles('storage-states/*.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: storage-states
+          key: storage-state-${{ hashFiles('storage-states/*.json') }}
 
-    - name: 淇濆瓨鏃ュ織
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: artifacts-${{ github.run_number }}
-        path: |
-          logs/
-          screenshots/
-        if-no-files-found: ignore
-        retention-days: 7
+      - name: Save balance history cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: balance_hash.txt
+          key: balance-hash-${{ hashFiles('balance_hash.txt') }}
 
-    - name: 鎵ц缁撴灉
-      if: always()
-      run: |
-        echo "绛惧埌浠诲姟鎵ц瀹屾垚"
-        echo "鏃堕棿: $(Get-Date)"
+      - name: Save logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ github.run_number }}
+          path: |
+            logs/
+            screenshots/
+          if-no-files-found: ignore
+          retention-days: 7
 
-# re-enable scheduled runs
+      - name: Result
+        if: always()
+        run: |
+          echo "Checkin task completed"
+          echo "Time: $(Get-Date)"
