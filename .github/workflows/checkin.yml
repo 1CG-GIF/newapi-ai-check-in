@@ -174,3 +174,5 @@ jobs:
       run: |
         echo "签到任务执行完成"
         echo "时间: $(Get-Date)"
+
+# re-enable scheduled runs
