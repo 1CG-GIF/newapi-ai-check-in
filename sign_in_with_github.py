@@ -320,7 +320,6 @@ class GitHubSignIn:
 
                                     # 如果 wait-for-secrets 失败，尝试通过 QQ 邮箱 IMAP 自动获取验证码
                                     if not otp_code:
-                                        import os
                                         qq_email = os.environ.get("QQ_EMAIL", "")
                                         qq_auth_code = os.environ.get("QQ_EMAIL_AUTH_CODE", "")
                                         if qq_email and qq_auth_code:
