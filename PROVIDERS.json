@@ -159,7 +159,7 @@
     "aliyun_captcha": false,
     "bypass_method": null
   }
-}，
+},
   "modelset": {
     "origin": "https://console.modelset.top",
     "login_path": "/login",
