@@ -102,6 +102,10 @@ jobs:
           PROVIDERS_INPUT: ${{ inputs.providers }}
         run: |
           if (Test-Path "storage-states") {
+            Remove-Item -Recurse -Force "storage-states"
+            echo "Cleared storage-states to force fresh login"
+          }
+          if (Test-Path "storage-states") {
             echo "storage-states directory exists"
             Get-ChildItem -Path storage-states -File | ForEach-Object { echo "  - $($_.Name)" }
           } else {
