@@ -108,18 +108,25 @@ class GitHubSignIn:
 
             async def _capture_oauth_callback(route):
                 try:
+                    print(f"ℹ️ {self.account_name}: Route intercepted: {route.request.url}")
                     response = await route.continue_()
-                    if response and response.status == 200:
+                    if response:
                         body = await response.text()
                         captured_callback["response"] = body
-                        print(f"ℹ️ {{self.account_name}}: Captured OAuth callback response from browser (len={{len(body)}})")
+                        captured_callback["status"] = response.status
+                        print(
+                            f"ℹ️ {self.account_name}: Captured OAuth callback response "
+                            f"(status={response.status}, len={len(body)})"
+                        )
+                    else:
+                        print(f"⚠️ {self.account_name}: Route got no response")
                 except Exception as cap_err:
-                    print(f"⚠️ {{self.account_name}}: Failed to capture OAuth callback response: {{cap_err}}")
+                    print(f"⚠️ {self.account_name}: Failed to capture OAuth callback response: {cap_err}")
 
             try:
                 await page.route("**/api/oauth/github**", _capture_oauth_callback)
             except Exception as route_err:
-                print(f"⚠️ {{self.account_name}}: Failed to install OAuth callback route: {{route_err}}")
+                print(f"⚠️ {self.account_name}: Failed to install OAuth callback route: {route_err}")
 
             async with ClickSolver(
                 framework=FrameworkType.CAMOUFOX, page=page, max_attempts=5, attempt_delay=3
@@ -330,8 +337,8 @@ class GitHubSignIn:
                                         cb_api_user = cb_data["user"].get("id")
                                     if cb_access_token:
                                         print(
-                                            f"✅ {{self.account_name}}: Got access_token from captured browser callback "
-                                            f"(api_user={{cb_api_user}})"
+                                            f"✅ {self.account_name}: Got access_token from captured browser callback "
+                                            f"(api_user={cb_api_user})"
                                         )
                                         cb_cookies = await context.cookies()
                                         cb_user_cookies = filter_cookies(cb_cookies, self.provider_config.origin)
@@ -341,7 +348,7 @@ class GitHubSignIn:
                                             "cookies": cb_user_cookies,
                                         }, None
                             except Exception as parse_err:
-                                print(f"⚠️ {{self.account_name}}: Failed to parse captured callback response: {{parse_err}}")
+                                print(f"⚠️ {self.account_name}: Failed to parse captured callback response: {parse_err}")
 
                         # 检查是否在 Cloudflare 验证页面
                         page_title = await page.title()
