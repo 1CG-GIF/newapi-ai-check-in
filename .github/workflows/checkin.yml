@@ -25,6 +25,9 @@ jobs:
   checkin:
     runs-on: windows-latest
     environment: production
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Set Beijing timezone
         uses: szenius/set-timezone@v2.0
