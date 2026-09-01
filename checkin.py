@@ -1335,6 +1335,9 @@ class CheckIn:
                         if json_data and json_data.get("success"):
                             user_data = json_data.get("data", {})
                             api_user = user_data.get("id")
+                            # 兼容新版 new-api：用户信息嵌套在 data.user 中
+                            if api_user is None and isinstance(user_data.get("user"), dict):
+                                api_user = user_data["user"].get("id")
 
                             if api_user:
                                 print(f"✅ {self.account_name}: Got api_user from callback: {api_user}")
@@ -1499,6 +1502,9 @@ class CheckIn:
                         if json_data and json_data.get("success"):
                             user_data = json_data.get("data", {})
                             api_user = user_data.get("id")
+                            # 兼容新版 new-api：用户信息嵌套在 data.user 中
+                            if api_user is None and isinstance(user_data.get("user"), dict):
+                                api_user = user_data["user"].get("id")
 
                             if api_user:
                                 print(f"✅ {self.account_name}: Got api_user from callback: {api_user}")

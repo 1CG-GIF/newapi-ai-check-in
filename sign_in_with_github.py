@@ -288,10 +288,13 @@ class GitHubSignIn:
                     cloudflare_challenge_detected = False
 
                     try:
+                        callback_url = None
                         # 使用配置的 OAuth 回调路径匹配模式
                         redirect_pattern = self.provider_config.get_github_auth_redirect_pattern()
                         print(f"ℹ️ {self.account_name}: Waiting for OAuth callback to: {redirect_pattern}")
                         await page.wait_for_url(redirect_pattern, timeout=30000)
+                        # 立即捕获回调 URL（部分站点如 ModelSet 会在前端处理 code 后快速跳转）
+                        callback_url = page.url
                         await page.wait_for_timeout(5000)
 
                         # 检查是否在 Cloudflare 验证页面
@@ -312,6 +315,7 @@ class GitHubSignIn:
                     except Exception as e:
                         # 检查 URL 中是否包含 code 参数，如果包含则视为正常（OAuth 回调成功）
                         if "code=" in page.url:
+                            callback_url = page.url
                             print(f"ℹ️ {self.account_name}: Redirect timeout but OAuth code found in URL, continuing...")
                         else:
                             print(
@@ -368,7 +372,7 @@ class GitHubSignIn:
                     else:
                         print(f"⚠️ {self.account_name}: OAuth callback received but no user ID found")
                         await take_screenshot(page, "github_oauth_failed_no_user_id", self.account_name)
-                        parsed_url = urlparse(current_url)
+                        parsed_url = urlparse(callback_url or current_url)
                         query_params = parse_qs(parsed_url.query)
 
                         # 如果 query 中包含 code，说明 OAuth 回调成功
