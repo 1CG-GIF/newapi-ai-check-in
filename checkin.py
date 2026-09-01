@@ -1308,6 +1308,22 @@ class CheckIn:
 
                 merged_cookies = {**bypass_cookies, **user_cookies}
                 return await self.check_in_with_cookies(merged_cookies, updated_headers, api_user)
+            elif success and "access_token" in result_data:
+                # 从浏览器拦截到的前端回调响应（新版 new-api 如 ModelSet，flow_token 一次性）
+                access_token = result_data["access_token"]
+                api_user = result_data.get("api_user")
+                print(
+                    f"✅ {self.account_name}: Using access_token from captured browser callback "
+                    f"(api_user={api_user})"
+                )
+                # 如果 OAuth 登录返回了 browser_headers，用它更新 common_headers
+                token_headers = common_headers.copy()
+                if oauth_browser_headers:
+                    token_headers.update(oauth_browser_headers)
+                return await self.check_in_with_system_access_token(
+                    access_token, bypass_cookies, token_headers, api_user or "-1"
+                )
+
             elif success and "code" in result_data and "state" in result_data:
                 # 收到 OAuth code，通过 HTTP 调用回调接口获取 api_user
                 print(f"ℹ️ {self.account_name}: Received OAuth code, calling callback API")

@@ -101,6 +101,26 @@ class GitHubSignIn:
 
             page = await context.new_page()
 
+            # 拦截新版 new-api（如 ModelSet）前端在回调页面发起的 /api/oauth/github 请求。
+            # 这类站点的 flow_token 是一次性的：前端消费后脚本无法再用同一个 state 回调，
+            # 所以直接从浏览器拦截前端的回调响应，提取 access_token。
+            captured_callback = {"response": None}
+
+            async def _capture_oauth_callback(route):
+                try:
+                    response = await route.continue_()
+                    if response and response.status == 200:
+                        body = await response.text()
+                        captured_callback["response"] = body
+                        print(f"ℹ️ {{self.account_name}}: Captured OAuth callback response from browser (len={{len(body)}})")
+                except Exception as cap_err:
+                    print(f"⚠️ {{self.account_name}}: Failed to capture OAuth callback response: {{cap_err}}")
+
+            try:
+                await page.route("**/api/oauth/github**", _capture_oauth_callback)
+            except Exception as route_err:
+                print(f"⚠️ {{self.account_name}}: Failed to install OAuth callback route: {{route_err}}")
+
             async with ClickSolver(
                 framework=FrameworkType.CAMOUFOX, page=page, max_attempts=5, attempt_delay=3
             ) as solver:
@@ -296,6 +316,32 @@ class GitHubSignIn:
                         # 立即捕获回调 URL（部分站点如 ModelSet 会在前端处理 code 后快速跳转）
                         callback_url = page.url
                         await page.wait_for_timeout(5000)
+
+                        # 如果从浏览器拦截到了前端的回调响应（新版 new-api 如 ModelSet），
+                        # 直接用它的 access_token，不再用 curl_cffi 重复回调（flow_token 是一次性的）
+                        if captured_callback.get("response"):
+                            try:
+                                cb_json = json.loads(captured_callback["response"])
+                                if cb_json.get("success"):
+                                    cb_data = cb_json.get("data", {})
+                                    cb_access_token = cb_data.get("access_token")
+                                    cb_api_user = cb_data.get("id")
+                                    if cb_api_user is None and isinstance(cb_data.get("user"), dict):
+                                        cb_api_user = cb_data["user"].get("id")
+                                    if cb_access_token:
+                                        print(
+                                            f"✅ {{self.account_name}}: Got access_token from captured browser callback "
+                                            f"(api_user={{cb_api_user}})"
+                                        )
+                                        cb_cookies = await context.cookies()
+                                        cb_user_cookies = filter_cookies(cb_cookies, self.provider_config.origin)
+                                        return True, {
+                                            "access_token": cb_access_token,
+                                            "api_user": cb_api_user,
+                                            "cookies": cb_user_cookies,
+                                        }, None
+                            except Exception as parse_err:
+                                print(f"⚠️ {{self.account_name}}: Failed to parse captured callback response: {{parse_err}}")
 
                         # 检查是否在 Cloudflare 验证页面
                         page_title = await page.title()
