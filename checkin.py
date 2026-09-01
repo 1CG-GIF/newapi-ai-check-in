@@ -501,85 +501,113 @@ class CheckIn:
         self,
         session: curl_requests.Session,
         headers: dict,
+        oauth_provider: str = "github",
     ) -> dict:
         """获取认证状态
-        
-        使用 curl_cffi Session 发送请求。Session 可在创建时设置全局 impersonate。
-        
+
+        兼容两类站点实现：
+        1. GET /api/oauth/state（如维云 vsllm），data 直接返回 state 字符串；
+        2. POST /api/oauth/state，JSON body 为 {"provider": "github", "intent": "login"}，
+           data 返回 {"flow_token": "..."}（如 ModelSet，新版 new-api）。
+        先尝试 GET，失败时自动回退 POST。
+
         Args:
-            session: curl_cffi Session 客户端（已包含 cookies，可能已设置 impersonate）
+            session: curl_cffi Session 客户端
             headers: 请求头
+            oauth_provider: OAuth 提供商标识（github / linux.do），用于 POST body
         """
+
+        def _parse_state_response(response):
+            """解析 state 响应，返回 ((state, cookies), error)。"""
+            json_data = response_resolve(response, "get_auth_state", self.account_name)
+            if json_data is None:
+                return None, "Invalid response type (saved to logs)"
+            if not json_data.get("success"):
+                return None, json_data.get("message", "Unknown error")
+
+            auth_data = json_data.get("data")
+            # 兼容 {"flow_token": "..."} / {"state": "..."} 对象形式
+            if isinstance(auth_data, dict):
+                auth_data = auth_data.get("flow_token") or auth_data.get("state")
+
+            # 将 curl_cffi Cookies 转换为 Camoufox 格式
+            result_cookies = []
+            parsed_domain = urlparse(self.provider_config.origin).netloc
+            print(f"\u2139\ufe0f {self.account_name}: Got {len(response.cookies)} cookies from auth state request")
+            for cookie in response.cookies.jar:
+                http_only_raw = cookie._rest.get("HttpOnly", False)
+                http_only = bool(http_only_raw) if http_only_raw is not None else False
+                same_site_raw = cookie._rest.get("SameSite", "Lax")
+                same_site = str(same_site_raw) if same_site_raw else "Lax"
+                secure = bool(cookie.secure) if cookie.secure is not None else False
+                print(
+                    f"  \U0001f4da Cookie: {cookie.name} (Domain: {cookie.domain}, "
+                    f"Path: {cookie.path}, Expires: {cookie.expires}, "
+                    f"HttpOnly: {http_only}, Secure: {secure}, SameSite: {same_site})"
+                )
+                cookie_dict = {
+                    "name": cookie.name,
+                    "domain": cookie.domain if cookie.domain else parsed_domain,
+                    "value": cookie.value,
+                    "path": cookie.path if cookie.path else "/",
+                    "secure": secure,
+                    "httpOnly": http_only,
+                    "sameSite": same_site,
+                }
+                if cookie.expires is not None:
+                    cookie_dict["expires"] = float(cookie.expires)
+                result_cookies.append(cookie_dict)
+
+            return (auth_data, result_cookies), None
+
         try:
+            # 1) 先尝试 GET（旧版 new-api，如维云）
+            state_tuple = None
+            last_error = ""
             response = session.get(
                 self.provider_config.get_auth_state_url(),
                 headers=headers,
                 timeout=30,
             )
-
             if response.status_code == 200:
-                json_data = response_resolve(response, "get_auth_state", self.account_name)
-                if json_data is None:
-                    return {
-                        "success": False,
-                        "error": "Failed to get auth state: Invalid response type (saved to logs)",
-                    }
+                state_tuple, last_error = _parse_state_response(response)
+            else:
+                last_error = f"HTTP {response.status_code}"
 
-                # 检查响应是否成功
-                if json_data.get("success"):
-                    auth_data = json_data.get("data")
-
-                    # 将 curl_cffi Cookies 转换为 Camoufox 格式
-                    result_cookies = []
-                    parsed_domain = urlparse(self.provider_config.origin).netloc
-
-                    print(f"ℹ️ {self.account_name}: Got {len(response.cookies)} cookies from auth state request")
-                    for cookie in response.cookies.jar:
-                        # 从 _rest 中获取 HttpOnly 和 SameSite，确保类型正确
-                        http_only_raw = cookie._rest.get("HttpOnly", False)
-                        http_only = bool(http_only_raw) if http_only_raw is not None else False
-                        
-                        same_site_raw = cookie._rest.get("SameSite", "Lax")
-                        same_site = str(same_site_raw) if same_site_raw else "Lax"
-                        
-                        # secure 也需要确保是布尔值
-                        secure = bool(cookie.secure) if cookie.secure is not None else False
-                        
-                        print(
-                            f"  📚 Cookie: {cookie.name} (Domain: {cookie.domain}, "
-                            f"Path: {cookie.path}, Expires: {cookie.expires}, "
-                            f"HttpOnly: {http_only}, Secure: {secure}, "
-                            f"SameSite: {same_site})"
-                        )
-                        # 构建 cookie 字典，Camoufox 要求字段类型严格
-                        cookie_dict = {
-                            "name": cookie.name,
-                            "domain": cookie.domain if cookie.domain else parsed_domain,
-                            "value": cookie.value,
-                            "path": cookie.path if cookie.path else "/",
-                            "secure": secure,
-                            "httpOnly": http_only,
-                            "sameSite": same_site,
-                        }
-                        # 只有当 expires 是有效的数值时才添加
-                        if cookie.expires is not None:
-                            cookie_dict["expires"] = float(cookie.expires)
-                        result_cookies.append(cookie_dict)
-
-                    return {
-                        "success": True,
-                        "state": auth_data,
-                        "cookies": result_cookies,
-                    }
+            # 2) GET 失败则回退 POST（新版 new-api，如 ModelSet）
+            if state_tuple is None:
+                print(
+                    f"\u2139\ufe0f {self.account_name}: GET auth state failed ({last_error}), "
+                    f"trying POST for provider '{oauth_provider}'"
+                )
+                post_headers = headers.copy()
+                post_headers["Content-Type"] = "application/json"
+                response = session.post(
+                    self.provider_config.get_auth_state_url(),
+                    headers=post_headers,
+                    json={"provider": oauth_provider, "intent": "login"},
+                    timeout=30,
+                )
+                if response.status_code == 200:
+                    state_tuple, last_error = _parse_state_response(response)
                 else:
-                    error_msg = json_data.get("message", "Unknown error")
                     return {
                         "success": False,
-                        "error": f"Failed to get auth state: {error_msg}",
+                        "error": f"Failed to get auth state: GET then POST, last HTTP {response.status_code}",
                     }
+
+            if state_tuple is None:
+                return {"success": False, "error": f"Failed to get auth state: {last_error}"}
+
+            auth_data, result_cookies = state_tuple
+            if not auth_data:
+                return {"success": False, "error": "Failed to get auth state: empty state"}
+
+            print(f"\u2139\ufe0f {self.account_name}: Got auth state for {oauth_provider}: {auth_data}")
             return {
-                "success": False,
-                "error": f"Failed to get auth state: HTTP {response.status_code}",
+                "success": True,
+                "state": auth_data,
+                "cookies": result_cookies,
             }
         except Exception as e:
             return {
@@ -724,6 +752,26 @@ class CheckIn:
                 "success": False,
                 "error": f"Failed to get user info, {e}",
             }
+
+    @staticmethod
+    def _is_checkin_disabled(error_msg) -> bool:
+        """Whether check-in failure is only because the site disabled daily check-in.
+
+        Some sites (e.g. vsllm) retired daily check-in but keep other tasks such as
+        the gwent card draw; this error must not block the following topup step.
+        """
+        if not error_msg:
+            return False
+        msg = str(error_msg).lower()
+        disabled_keywords = [
+            "签到功能未启用",
+            "签到未启用",
+            "check-in is disabled",
+            "checkin is disabled",
+            "check-in disabled",
+            "checkin disabled",
+        ]
+        return any(kw.lower() in msg for kw in disabled_keywords)
 
     def execute_check_in(
         self,
@@ -986,7 +1034,11 @@ class CheckIn:
                         # 未签到，执行签到
                         check_in_result = self.execute_check_in(session, headers, api_user)
                         if not check_in_result.get("success"):
-                            return False, {"error": check_in_result.get("error", "Check-in failed")}
+                            _ck_err = check_in_result.get("error", "Check-in failed")
+                            if self._is_checkin_disabled(_ck_err):
+                                print(f"⚠️ {self.account_name}: Check-in disabled by site, continue to topup: {_ck_err}")
+                            else:
+                                return False, {"error": _ck_err}
                         # 签到成功后再次查询状态（显示最新状态）
                         check_in_status_func(
                             provider_config=self.provider_config,
@@ -998,7 +1050,11 @@ class CheckIn:
                     # 没有配置签到状态查询函数，直接执行签到
                     check_in_result = self.execute_check_in(session, headers, api_user)
                     if not check_in_result.get("success"):
-                        return False, {"error": check_in_result.get("error", "Check-in failed")}
+                        _ck_err = check_in_result.get("error", "Check-in failed")
+                        if self._is_checkin_disabled(_ck_err):
+                            print(f"⚠️ {self.account_name}: Check-in disabled by site, continue to topup: {_ck_err}")
+                        else:
+                            return False, {"error": _ck_err}
             else:
                 print(f"ℹ️ {self.account_name}: Check-in completed automatically (triggered by user info request)")
 
@@ -1093,7 +1149,11 @@ class CheckIn:
                         # 未签到，执行签到
                         check_in_result = self.execute_check_in(session, headers, api_user)
                         if not check_in_result.get("success"):
-                            return False, {"error": check_in_result.get("error", "Check-in failed")}
+                            _ck_err = check_in_result.get("error", "Check-in failed")
+                            if self._is_checkin_disabled(_ck_err):
+                                print(f"⚠️ {self.account_name}: Check-in disabled by site, continue to topup: {_ck_err}")
+                            else:
+                                return False, {"error": _ck_err}
                         # 签到成功后再次查询状态（显示最新状态）
                         check_in_status_func(
                             provider_config=self.provider_config,
@@ -1105,7 +1165,11 @@ class CheckIn:
                     # 没有配置签到状态查询函数，直接执行签到
                     check_in_result = self.execute_check_in(session, headers, api_user)
                     if not check_in_result.get("success"):
-                        return False, {"error": check_in_result.get("error", "Check-in failed")}
+                        _ck_err = check_in_result.get("error", "Check-in failed")
+                        if self._is_checkin_disabled(_ck_err):
+                            print(f"⚠️ {self.account_name}: Check-in disabled by site, continue to topup: {_ck_err}")
+                        else:
+                            return False, {"error": _ck_err}
             else:
                 print(f"ℹ️ {self.account_name}: Check-in completed automatically (triggered by user info request)")
 
@@ -1201,6 +1265,7 @@ class CheckIn:
             auth_state_result = await self.get_auth_state(
                 session=session,
                 headers=headers,
+                oauth_provider="github",
             )
             if auth_state_result and auth_state_result.get("success"):
                 print(f"ℹ️ {self.account_name}: Got auth state for GitHub: {auth_state_result['state']}")
@@ -1364,6 +1429,7 @@ class CheckIn:
             auth_state_result = await self.get_auth_state(
                 session=session,
                 headers=headers,
+                oauth_provider="linux.do",
             )
             if auth_state_result and auth_state_result.get("success"):
                 print(f"ℹ️ {self.account_name}: Got auth state for Linux.do: {auth_state_result['state']}")
@@ -1540,10 +1606,27 @@ class CheckIn:
                 return False, {"error": error_msg}
 
             user_data = json_data.get("data", {})
+            # 兼容新版 new-api：用户信息嵌套在 data.user 中（如年华API）
+            nested_user = user_data.get("user")
+            if not isinstance(nested_user, dict):
+                nested_user = None
             api_user = user_data.get("id")
+            if api_user is None and nested_user is not None:
+                api_user = nested_user.get("id")
             if api_user is None:
                 print(f"❌ {self.account_name}: No user ID in site login response")
                 return False, {"error": "No user ID in site login response"}
+
+            # 新版 new-api 登录返回 access_token，使用 Bearer 认证（不依赖 session cookie）
+            access_token = user_data.get("access_token")
+            if access_token:
+                print(
+                    f"ℹ️ {self.account_name}: Got access token from login, "
+                    f"using Bearer auth (api_user={api_user})"
+                )
+                return await self.check_in_with_system_access_token(
+                    access_token, bypass_cookies, common_headers, api_user
+                )
 
             user_cookies = {}
             for cookie in session.cookies.jar:
