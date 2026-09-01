@@ -1330,6 +1330,17 @@ class CheckIn:
 
                     response = session.get(callback_url, headers=updated_headers, timeout=30)
 
+                    # 新版 new-api（如 ModelSet）回调可能需要 POST；GET 失败时回退
+                    if response.status_code != 200:
+                        print(
+                            f"⚠️ {self.account_name}: OAuth callback GET HTTP {response.status_code}, "
+                            f"body: {response.text[:300]!r}, trying POST..."
+                        )
+                        try:
+                            response = session.post(callback_url, headers=updated_headers, timeout=30)
+                        except Exception as post_err:
+                            print(f"⚠️ {self.account_name}: OAuth callback POST failed: {post_err}")
+
                     if response.status_code == 200:
                         json_data = response_resolve(response, "github_oauth_callback", self.account_name)
                         if json_data and json_data.get("success"):
@@ -1338,6 +1349,17 @@ class CheckIn:
                             # 兼容新版 new-api：用户信息嵌套在 data.user 中
                             if api_user is None and isinstance(user_data.get("user"), dict):
                                 api_user = user_data["user"].get("id")
+
+                            # 新版 new-api 回调返回 access_token，使用 Bearer 认证（不依赖 session cookie）
+                            access_token = user_data.get("access_token")
+                            if access_token:
+                                print(
+                                    f"✅ {self.account_name}: Got access_token from callback, "
+                                    f"using Bearer auth (api_user={api_user})"
+                                )
+                                return await self.check_in_with_system_access_token(
+                                    access_token, bypass_cookies, updated_headers, api_user or "-1"
+                                )
 
                             if api_user:
                                 print(f"✅ {self.account_name}: Got api_user from callback: {api_user}")
@@ -1360,7 +1382,10 @@ class CheckIn:
                             print(f"❌ {self.account_name}: OAuth callback failed: {error_msg}")
                             return False, {"error": f"OAuth callback failed: {error_msg}"}
                     else:
-                        print(f"❌ {self.account_name}: OAuth callback HTTP {response.status_code}")
+                        print(
+                            f"❌ {self.account_name}: OAuth callback HTTP {response.status_code}, "
+                            f"body: {response.text[:300]!r}"
+                        )
                         return False, {"error": f"OAuth callback HTTP {response.status_code}"}
                 except Exception as callback_err:
                     print(f"❌ {self.account_name}: Error calling OAuth callback: {callback_err}")
@@ -1497,6 +1522,17 @@ class CheckIn:
 
                     response = session.get(callback_url, headers=updated_headers, timeout=30)
 
+                    # 新版 new-api（如 ModelSet）回调可能需要 POST；GET 失败时回退
+                    if response.status_code != 200:
+                        print(
+                            f"⚠️ {self.account_name}: OAuth callback GET HTTP {response.status_code}, "
+                            f"body: {response.text[:300]!r}, trying POST..."
+                        )
+                        try:
+                            response = session.post(callback_url, headers=updated_headers, timeout=30)
+                        except Exception as post_err:
+                            print(f"⚠️ {self.account_name}: OAuth callback POST failed: {post_err}")
+
                     if response.status_code == 200:
                         json_data = response_resolve(response, "linuxdo_oauth_callback", self.account_name)
                         if json_data and json_data.get("success"):
@@ -1505,6 +1541,17 @@ class CheckIn:
                             # 兼容新版 new-api：用户信息嵌套在 data.user 中
                             if api_user is None and isinstance(user_data.get("user"), dict):
                                 api_user = user_data["user"].get("id")
+
+                            # 新版 new-api 回调返回 access_token，使用 Bearer 认证（不依赖 session cookie）
+                            access_token = user_data.get("access_token")
+                            if access_token:
+                                print(
+                                    f"✅ {self.account_name}: Got access_token from callback, "
+                                    f"using Bearer auth (api_user={api_user})"
+                                )
+                                return await self.check_in_with_system_access_token(
+                                    access_token, bypass_cookies, updated_headers, api_user or "-1"
+                                )
 
                             if api_user:
                                 print(f"✅ {self.account_name}: Got api_user from callback: {api_user}")
@@ -1527,7 +1574,10 @@ class CheckIn:
                             print(f"❌ {self.account_name}: OAuth callback failed: {error_msg}")
                             return False, {"error": f"OAuth callback failed: {error_msg}"}
                     else:
-                        print(f"❌ {self.account_name}: OAuth callback HTTP {response.status_code}")
+                        print(
+                            f"❌ {self.account_name}: OAuth callback HTTP {response.status_code}, "
+                            f"body: {response.text[:300]!r}"
+                        )
                         return False, {"error": f"OAuth callback HTTP {response.status_code}"}
                 except Exception as callback_err:
                     print(f"❌ {self.account_name}: Error calling OAuth callback: {callback_err}")
