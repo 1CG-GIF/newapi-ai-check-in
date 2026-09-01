@@ -95,16 +95,14 @@ jobs:
           PROXY: ${{ secrets.PROXY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          QQ_EMAIL: ${{ secrets.QQ_EMAIL }}
+          QQ_EMAIL_AUTH_CODE: ${{ secrets.QQ_EMAIL_AUTH_CODE }}
           DEBUG: ${{ inputs.debug }}
           PYTHONIOENCODING: utf-8
           PYTHONUTF8: "1"
           ACCOUNTS_INPUT: ${{ inputs.accounts }}
           PROVIDERS_INPUT: ${{ inputs.providers }}
         run: |
-          if (Test-Path "storage-states") {
-            Remove-Item -Recurse -Force "storage-states"
-            echo "Cleared storage-states to force fresh login"
-          }
           if (Test-Path "storage-states") {
             echo "storage-states directory exists"
             Get-ChildItem -Path storage-states -File | ForEach-Object { echo "  - $($_.Name)" }

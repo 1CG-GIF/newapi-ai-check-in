@@ -17,6 +17,87 @@ from utils.storage_state import ensure_storage_state_from_env
 STORAGE_STATE_ENV_NAME = "STORATE_STATES_GITHUB"
 
 
+
+def fetch_github_otp_from_email(email: str, auth_code: str, timeout: int = 60) -> str | None:
+    """通过 QQ 邮箱 IMAP 读取最新的 GitHub 设备验证邮件，提取 6 位验证码。"""
+    import imaplib
+    import email
+    from email.header import decode_header
+    import re
+    import time
+
+    if not email or not auth_code:
+        return None
+
+    print(f"📧 正在通过 QQ 邮箱 IMAP 获取 GitHub 验证码 (邮箱: {email})...")
+    start = time.time()
+    last_code = None
+
+    while time.time() - start < timeout:
+        try:
+            mail = imaplib.IMAP4_SSL("imap.qq.com", 993)
+            mail.login(email, auth_code)
+            mail.select("INBOX")
+
+            # 搜索来自 GitHub 的未读邮件
+            status, messages = mail.search(None, '(FROM "github.com" UNSEEN)')
+            if status != "OK" or not messages[0]:
+                # 也搜索所有 GitHub 邮件（不限于未读）
+                status, messages = mail.search(None, '(FROM "github.com")')
+
+            if status == "OK" and messages[0]:
+                email_ids = messages[0].split()
+                # 从最新的邮件开始检查
+                for eid in reversed(email_ids[-10:]):
+                    status, msg_data = mail.fetch(eid, "(RFC822)")
+                    if status != "OK":
+                        continue
+                    msg = email.message_from_bytes(msg_data[0][1])
+
+                    # 解析主题
+                    subject = ""
+                    subj_parts = decode_header(msg["Subject"])
+                    for part, enc in subj_parts:
+                        if isinstance(part, bytes):
+                            subject += part.decode(enc or "utf-8", errors="ignore")
+                        else:
+                            subject += part
+
+                    # 只处理设备验证邮件
+                    if "verify your device" not in subject.lower() and "verification" not in subject.lower():
+                        continue
+
+                    # 解析正文
+                    body = ""
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            if part.get_content_type() == "text/plain":
+                                payload = part.get_payload(decode=True)
+                                if payload:
+                                    body += payload.decode("utf-8", errors="ignore")
+                    else:
+                        payload = msg.get_payload(decode=True)
+                        if payload:
+                            body = payload.decode("utf-8", errors="ignore")
+
+                    # 提取 6 位数字验证码
+                    match = re.search(r"\b(\d{6})\b", body)
+                    if match:
+                        code = match.group(1)
+                        print(f"✅ 从邮箱获取到 GitHub 验证码: {code} (主题: {subject[:60]})")
+                        mail.logout()
+                        return code
+
+            mail.logout()
+        except Exception as e:
+            print(f"⚠️ 邮箱 IMAP 读取失败: {e}")
+
+        time.sleep(3)
+
+    print(f"❌ 在 {timeout} 秒内未能从邮箱获取到 GitHub 验证码")
+    return None
+
+
 class GitHubSignIn:
     """使用 GitHub 登录授权类"""
 
@@ -236,6 +317,16 @@ class GitHubSignIn:
                                             print(f"✅ {self.account_name}: Retrieved OTP via wait-for-secrets")
                                     except Exception as e:
                                         print(f"⚠️ {self.account_name}: wait-for-secrets failed: {e}")
+
+                                    # 如果 wait-for-secrets 失败，尝试通过 QQ 邮箱 IMAP 自动获取验证码
+                                    if not otp_code:
+                                        import os
+                                        qq_email = os.environ.get("QQ_EMAIL", "")
+                                        qq_auth_code = os.environ.get("QQ_EMAIL_AUTH_CODE", "")
+                                        if qq_email and qq_auth_code:
+                                            otp_code = fetch_github_otp_from_email(qq_email, qq_auth_code, timeout=90)
+                                        else:
+                                            print(f"ℹ️ {self.account_name}: QQ_EMAIL / QQ_EMAIL_AUTH_CODE 未配置，跳过邮箱自动获取验证码")
 
                                     if otp_code:
                                         # 自动填充 OTP
