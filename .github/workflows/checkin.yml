@@ -24,7 +24,6 @@ on:
 jobs:
   checkin:
     runs-on: windows-latest
-    environment: production
     permissions:
       id-token: write
       contents: read
