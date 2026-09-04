@@ -89,15 +89,6 @@ jobs:
           path: balance_hash.txt
           key: balance-hash-${{ hashFiles('balance_hash.txt') }}
 
-      - name: Clear old login state
-        run: |
-          if (Test-Path "storage-states") {
-            Remove-Item -Recurse -Force "storage-states"
-            echo "Cleared old login state to force re-login"
-          } else {
-            echo "No old login state to clear"
-          }
-
       - name: Run checkin
         env:
           ACCOUNTS: ${{ secrets.ACCOUNTS }}
