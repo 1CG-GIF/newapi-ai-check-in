@@ -1628,6 +1628,10 @@ class CheckIn:
         if success or mode == "api":
             return success, result
 
+        if result.get("skip_browser_fallback"):
+            print(f"⚠️ {self.account_name}: Site API login failed with unrecoverable error, skipping browser fallback")
+            return success, result
+
         print(f"⚠️ {self.account_name}: Site API login failed, falling back to browser login")
         return await self.check_in_with_site_browser(username, password, bypass_cookies, common_headers)
 
@@ -1668,7 +1672,16 @@ class CheckIn:
                 print(f"❌ {self.account_name}: Site login failed - HTTP {response.status_code}")
                 return False, {"error": f"Site login HTTP {response.status_code}"}
             if response.status_code == 409:
-                print(f"⚠️ {self.account_name}: Site login returned HTTP 409 (already logged in?), logging out and retrying")
+                # Check if it's AUTH_SESSION_LIMIT (session count limit)
+                try:
+                    error_data = response_resolve(response, "409_error", self.account_name)
+                    error_code = error_data.get("code", "") if error_data else ""
+                    if error_code == "AUTH_SESSION_LIMIT":
+                        print(f"❌ {self.account_name}: Site login failed - AUTH_SESSION_LIMIT (too many active sessions, wait for old sessions to expire)")
+                        return False, {"error": "AUTH_SESSION_LIMIT", "skip_browser_fallback": True}
+                except Exception:
+                    pass
+                print(f"⚠️ {self.account_name}: Site login returned HTTP 409, logging out and retrying")
                 # Logout first to clear existing session
                 try:
                     logout_url = f"{self.provider_config.origin}/api/user/logout"
