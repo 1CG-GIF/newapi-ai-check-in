@@ -1668,7 +1668,27 @@ class CheckIn:
                 print(f"❌ {self.account_name}: Site login failed - HTTP {response.status_code}")
                 return False, {"error": f"Site login HTTP {response.status_code}"}
             if response.status_code == 409:
-                print(f"⚠️ {self.account_name}: Site login returned HTTP 409 (already logged in?), attempting to parse response")
+                print(f"⚠️ {self.account_name}: Site login returned HTTP 409 (already logged in?), trying to get user info with existing cookies")
+                # Try to get user info directly with existing cookies
+                try:
+                    user_info_url = f"{self.provider_config.origin}{self.provider_config.user_info_path}"
+                    user_info_headers = common_headers.copy()
+                    user_info_headers[self.provider_config.api_user_key] = "-1"
+                    user_info_response = session.get(user_info_url, headers=user_info_headers, timeout=30)
+                    if user_info_response.status_code == 200:
+                        user_info_data = response_resolve(user_info_response, "user_info_409", self.account_name)
+                        if user_info_data and user_info_data.get("success"):
+                            user_data = user_info_data.get("data", {})
+                            api_user = user_data.get("id")
+                            if api_user:
+                                print(f"✅ {self.account_name}: Got user info from existing session (api_user={api_user}), skipping login")
+                                user_cookies = {}
+                                for cookie in session.cookies.jar:
+                                    user_cookies[cookie.name] = cookie.value
+                                merged_cookies = {**bypass_cookies, **user_cookies}
+                                return await self.check_in_with_cookies(merged_cookies, common_headers, api_user)
+                except Exception as e:
+                    print(f"⚠️ {self.account_name}: Failed to get user info in 409 handling: {e}")
 
             json_data = response_resolve(response, "site_login", self.account_name)
             if json_data is None:
