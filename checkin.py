@@ -1668,27 +1668,23 @@ class CheckIn:
                 print(f"❌ {self.account_name}: Site login failed - HTTP {response.status_code}")
                 return False, {"error": f"Site login HTTP {response.status_code}"}
             if response.status_code == 409:
-                print(f"⚠️ {self.account_name}: Site login returned HTTP 409 (already logged in?), trying to get user info with existing cookies")
-                # Try to get user info directly with existing cookies
+                print(f"⚠️ {self.account_name}: Site login returned HTTP 409 (already logged in?), logging out and retrying")
+                # Logout first to clear existing session
                 try:
-                    user_info_url = f"{self.provider_config.origin}{self.provider_config.user_info_path}"
-                    user_info_headers = common_headers.copy()
-                    user_info_headers[self.provider_config.api_user_key] = "-1"
-                    user_info_response = session.get(user_info_url, headers=user_info_headers, timeout=30)
-                    if user_info_response.status_code == 200:
-                        user_info_data = response_resolve(user_info_response, "user_info_409", self.account_name)
-                        if user_info_data and user_info_data.get("success"):
-                            user_data = user_info_data.get("data", {})
-                            api_user = user_data.get("id")
-                            if api_user:
-                                print(f"✅ {self.account_name}: Got user info from existing session (api_user={api_user}), skipping login")
-                                user_cookies = {}
-                                for cookie in session.cookies.jar:
-                                    user_cookies[cookie.name] = cookie.value
-                                merged_cookies = {**bypass_cookies, **user_cookies}
-                                return await self.check_in_with_cookies(merged_cookies, common_headers, api_user)
+                    logout_url = f"{self.provider_config.origin}/api/user/logout"
+                    logout_headers = common_headers.copy()
+                    logout_headers["Content-Type"] = "application/json"
+                    logout_headers["X-Requested-With"] = "XMLHttpRequest"
+                    logout_headers[self.provider_config.api_user_key] = "-1"
+                    logout_headers["Referer"] = self.provider_config.get_login_url()
+                    logout_headers["Origin"] = self.provider_config.origin
+                    session.post(logout_url, headers=logout_headers, json={}, timeout=30)
+                    print(f"ℹ️ {self.account_name}: Logout completed, retrying login")
+                    # Retry login after logout
+                    response = session.post(login_url, headers=headers, json=payload, timeout=30)
+                    print(f"ℹ️ {self.account_name}: Retry login status: {response.status_code}")
                 except Exception as e:
-                    print(f"⚠️ {self.account_name}: Failed to get user info in 409 handling: {e}")
+                    print(f"⚠️ {self.account_name}: Logout/retry failed: {e}, continuing with original 409 response")
 
             json_data = response_resolve(response, "site_login", self.account_name)
             if json_data is None:
