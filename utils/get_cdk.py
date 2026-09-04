@@ -882,7 +882,7 @@ def get_vsllm_gwent_draw(
     proxy_config = account_config.proxy or account_config.get("global_proxy")
     http_proxy = proxy_resolve(proxy_config)
 
-    origin = "https://vsllm.com"
+    origin = "https://vsllm.cc"
 
     try:
         session = curl_requests.Session(proxy=http_proxy, timeout=30)
