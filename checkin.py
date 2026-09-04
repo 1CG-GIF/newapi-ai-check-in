@@ -1664,9 +1664,11 @@ class CheckIn:
             payload = {"username": username, "password": password}
             response = session.post(login_url, headers=headers, json=payload, timeout=30)
 
-            if response.status_code != 200:
+            if response.status_code not in (200, 409):
                 print(f"❌ {self.account_name}: Site login failed - HTTP {response.status_code}")
                 return False, {"error": f"Site login HTTP {response.status_code}"}
+            if response.status_code == 409:
+                print(f"⚠️ {self.account_name}: Site login returned HTTP 409 (already logged in?), attempting to parse response")
 
             json_data = response_resolve(response, "site_login", self.account_name)
             if json_data is None:
