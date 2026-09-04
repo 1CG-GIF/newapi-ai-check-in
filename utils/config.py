@@ -839,7 +839,7 @@ class AppConfig:
             ),
             "vsllm": ProviderConfig(
                 name="vsllm",
-                origin="https://vsllm.com",
+                origin="https://vsllm.cc",
                 login_path="/login",
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
